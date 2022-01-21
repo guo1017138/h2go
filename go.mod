@@ -1,4 +1,4 @@
-module github.com/jmrobles/h2go
+module github.com/CodinGame/h2go
 
 go 1.13
 
