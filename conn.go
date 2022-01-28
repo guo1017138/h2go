@@ -19,7 +19,6 @@ package h2go
 import (
 	"context"
 	"database/sql/driver"
-	"fmt"
 
 	"net"
 
@@ -140,8 +139,7 @@ func (h2c *h2Conn) ExecContext(ctx context.Context, query string, args []driver.
 func connect(ci h2connInfo) (driver.Conn, error) {
 	var conn net.Conn
 	var err error
-	address := fmt.Sprintf("%s:%d", ci.host, ci.port)
-	conn, err = ci.dialer.Dial("tcp", address)
+	conn, err = ci.dialer.Dial(ci.network, ci.address)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to open H2 connection")
 	}
