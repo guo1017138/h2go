@@ -17,10 +17,10 @@ limitations under the License.
 package h2go
 
 import (
-	"io"
 	"bufio"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"net"
 	"time"
 	"unsafe"
@@ -75,6 +75,10 @@ func newTransfer(conn net.Conn) transfer {
 	buffWriter := bufio.NewWriter(conn)
 	buff := bufio.NewReadWriter(buffReader, buffWriter)
 	return transfer{conn: conn, buff: buff}
+}
+
+func (t *transfer) reset() {
+	t.buff.Reader.Discard(t.buff.Reader.Buffered())
 }
 
 func (t *transfer) readInt32() (int32, error) {

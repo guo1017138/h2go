@@ -55,6 +55,7 @@ func (h2c h2Conn) Ping(ctx context.Context) error {
 	if err != nil {
 		return driver.ErrBadConn
 	}
+	h2c.client.trans.reset()
 	return nil
 }
 
