@@ -109,8 +109,12 @@ func (s *session) prepare(t *transfer, sql string) (driver.Stmt, error) {
 	return stmt, nil
 }
 
-func (s *session) executeQuery(stmt *h2stmt, t *transfer) ([]string, int32, error) {
+func (s *session) executeQuery(stmt *h2stmt, t *transfer, values []driver.Value) ([]string, int64, error) {
 	var err error
+	// Check for params
+	if stmt.numParams != int32(len(values)) {
+		return nil, -1, fmt.Errorf("Num expected parameters mismatch: %d != %d", stmt.numParams, len(values))
+	}
 	// 0. Write COMMAND EXECUTE QUERY
 	L(log.DebugLevel, "Execute query")
 	err = t.writeInt32(sessionCommandExecuteQuery)
@@ -130,7 +134,11 @@ func (s *session) executeQuery(stmt *h2stmt, t *transfer) ([]string, int32, erro
 		return nil, -1, err
 	}
 	// 3. Write Max rows
-	err = t.writeInt32(0)
+	if t.getVersion() < TCP_PROTOCOL_VERSION_20 {
+		err = t.writeInt32(0)
+	} else {
+		err = t.writeInt64(0)
+	}
 	if err != nil {
 		return nil, -1, err
 	}
@@ -139,12 +147,24 @@ func (s *session) executeQuery(stmt *h2stmt, t *transfer) ([]string, int32, erro
 	if err != nil {
 		return nil, -1, err
 	}
-	// 4. Write Fetch max size
-	err = t.writeInt32(0)
+	// 5. Write params
+	// -- num parameters
+	err = t.writeInt32(stmt.numParams)
 	if err != nil {
 		return nil, -1, err
 	}
-
+	// -- parameters
+	for idx, value := range values {
+		switch value.(type) {
+		case time.Time:
+			err = t.writeDatetimeValue(value.(time.Time), stmt.parameters[idx])
+		default:
+			err = t.writeValue(value)
+		}
+		if err != nil {
+			return nil, -1, err
+		}
+	}
 	// 5. Flush data
 	err = t.flush()
 	if err != nil {
@@ -163,7 +183,14 @@ func (s *session) executeQuery(stmt *h2stmt, t *transfer) ([]string, int32, erro
 	if err != nil {
 		return nil, -1, err
 	}
-	rowCnt, err := t.readInt32()
+	var rowCnt int64
+	if t.getVersion() < TCP_PROTOCOL_VERSION_20 {
+		var cnt int32
+		cnt, err = t.readInt32()
+		rowCnt = int64(cnt)
+	} else {
+		rowCnt, err = t.readLong()
+	}
 	if err != nil {
 		return nil, -1, err
 	}
@@ -200,26 +227,22 @@ func (s *session) readColumns(t *transfer, colCnt int32) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		// Skip other info
-		// - Value type (int)
-		_, err = t.readInt32()
-		if err != nil {
-			return nil, err
-		}
-		// - Precision (long)
-		_, err = t.readLong()
-		if err != nil {
-			return nil, err
-		}
-		// - Scale (int)
-		_, err = t.readInt32()
-		if err != nil {
-			return nil, err
-		}
-		// - Display Size (int)
-		_, err = t.readInt32()
-		if err != nil {
-			return nil, err
+
+		if t.getVersion() < TCP_PROTOCOL_VERSION_20 {
+			_, err = t.getTypeInfo19()
+			if err != nil {
+				return nil, err
+			}
+			// - Display Size (int)
+			_, err = t.readInt32()
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			_, err = t.getTypeInfo20()
+			if err != nil {
+				return nil, err
+			}
 		}
 		// - Autoincrement (bool)
 		_, err = t.readBool()
@@ -293,7 +316,7 @@ func (err *h2error) Error() string {
 	return fmt.Sprintf("H2 SQL Exception: [%s] %s", err.strError, err.msg)
 }
 
-func (s *session) executeQueryUpdate(stmt *h2stmt, t *transfer, values []driver.Value) (int32, error) {
+func (s *session) executeQueryUpdate(stmt *h2stmt, t *transfer, values []driver.Value) (int64, error) {
 	var err error
 	// Check for params
 	if stmt.numParams != int32(len(values)) {
@@ -351,7 +374,14 @@ func (s *session) executeQueryUpdate(stmt *h2stmt, t *transfer, values []driver.
 	}
 	// TODO: assert status == 1
 	// Read num rows updated
-	nUpdated, err := t.readInt32()
+	var nUpdated int64
+	if t.getVersion() < TCP_PROTOCOL_VERSION_20 {
+		var cnt int32
+		cnt, err = t.readInt32()
+		nUpdated = int64(cnt)
+	} else {
+		nUpdated, err = t.readLong()
+	}
 	if err != nil {
 		return -1, err
 	}
@@ -426,18 +456,12 @@ func (s *session) prepare2(t *transfer, sql string) (driver.Stmt, error) {
 	// Metadata parameter type: int:type - long:precission - int:scale - int:nullable
 	for i := 0; i < int(numParams); i++ {
 		param := h2parameter{}
-		// -- Type
-		param.kind, err = t.readInt32()
-		if err != nil {
-			return nil, err
+		var typeinfo interface{}
+		if t.getVersion() < TCP_PROTOCOL_VERSION_20 {
+			typeinfo, err = t.getTypeInfo19()
+		} else {
+			typeinfo, err = t.getTypeInfo20()
 		}
-		// -- Precission
-		param.precission, err = t.readInt64()
-		if err != nil {
-			return nil, err
-		}
-		// -- Scale
-		param.scale, err = t.readInt32()
 		if err != nil {
 			return nil, err
 		}
@@ -448,7 +472,8 @@ func (s *session) prepare2(t *transfer, sql string) (driver.Stmt, error) {
 		}
 		// 0 = Not null, 1 == Nullable, 2 == Unknown
 		param.nullable = tmp == 1
-		L(log.DebugLevel, "PARAM: Kind: %d - Precission: %d - Scale: %d - Nullable: %v", param.kind, param.precission, param.scale, param.nullable)
+		param.typeinfo = typeinfo
+		L(log.DebugLevel, "PARAM: Typeinfo: %+v - Nullable: %v", param.typeinfo, param.nullable)
 		stmt.parameters = append(stmt.parameters, param)
 	}
 	return stmt, nil

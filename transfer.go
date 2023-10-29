@@ -30,43 +30,60 @@ import (
 	"golang.org/x/text/encoding/unicode"
 )
 
+const (
+	TCP_PROTOCOL_VERSION_17            int32 = 17
+	TCP_PROTOCOL_VERSION_18            int32 = 18
+	TCP_PROTOCOL_VERSION_19            int32 = 19
+	TCP_PROTOCOL_VERSION_20            int32 = 20
+	TCP_PROTOCOL_VERSION_MIN_SUPPORTED int32 = TCP_PROTOCOL_VERSION_17
+	TCP_PROTOCOL_VERSION_MAX_SUPPORTED int32 = TCP_PROTOCOL_VERSION_20
+)
+
 // Value types
 const (
-	Null             int32 = 0
-	Boolean          int32 = 1
-	Byte             int32 = 2
-	Short            int32 = 3
-	Int              int32 = 4
-	Long             int32 = 5
-	Decimal          int32 = 6
-	Double           int32 = 7
-	Float            int32 = 8
-	Time             int32 = 9
-	Date             int32 = 10
-	Timestamp        int32 = 11
-	Bytes            int32 = 12
-	String           int32 = 13
-	StringIgnoreCase int32 = 14
-	Blob             int32 = 15
-	Clob             int32 = 16
-	Array            int32 = 17
-	ResultSet        int32 = 18
-	JavaObject       int32 = 19
-	UUID             int32 = 20
-	StringFixed      int32 = 21
-	Geometry         int32 = 22
-	TimestampTZ      int32 = 24
-	Enum             int32 = 25
-	Interval         int32 = 26
-	Row              int32 = 27
-	JSON             int32 = 28
-	TimeTZQuery      int32 = 29
-	TimeTZ           int32 = 41
+	UNKNOWN            int32 = -1
+	NULL               int32 = 0
+	BOOLEAN            int32 = 1
+	TINYINT            int32 = 2
+	SMALLINT           int32 = 3
+	INTEGER            int32 = 4
+	BIGINT             int32 = 5
+	NUMERIC            int32 = 6
+	DOUBLE             int32 = 7
+	REAL               int32 = 8
+	TIME               int32 = 9
+	DATE               int32 = 10
+	TIMESTAMP          int32 = 11
+	VARBINARY          int32 = 12
+	VARCHAR            int32 = 13
+	VARCHAR_IGNORECASE int32 = 14
+	BLOB               int32 = 15
+	CLOB               int32 = 16
+	ARRAY              int32 = 17
+	JAVA_OBJECT        int32 = 18
+	JavaObject         int32 = 19
+	UUID               int32 = 20
+	CHAR               int32 = 21
+	GEOMETRY           int32 = 22
+	// 1.4.192
+	TIMESTAMP_TZ int32 = 24
+	// 1.4.195
+	ENUM int32 = 25
+	// 1.4.198
+	INTERVAL int32 = 26
+	ROW      int32 = 27
+	// 1.4.200
+	JSON    int32 = 28
+	TIME_TZ int32 = 29
+	// 2.0.202
+	BINARY   int32 = 30
+	DECFLOAT int32 = 31
 )
 
 type transfer struct {
-	conn net.Conn
-	buff *bufio.ReadWriter
+	conn    net.Conn
+	buff    *bufio.ReadWriter
+	version int32
 }
 
 func newTransfer(conn net.Conn) transfer {
@@ -79,6 +96,10 @@ func newTransfer(conn net.Conn) transfer {
 
 func (t *transfer) reset() {
 	t.buff.Reader.Discard(t.buff.Reader.Buffered())
+}
+
+func (t *transfer) getVersion() int32 {
+	return t.version
 }
 
 func (t *transfer) readInt32() (int32, error) {
@@ -321,60 +342,60 @@ func (t *transfer) readValue() (interface{}, error) {
 	}
 	L(log.DebugLevel, "Value type: %d", kind)
 	switch kind {
-	case Null:
+	case NULL:
 		// TODO: review
 		return nil, nil
-	case Bytes:
+	case VARBINARY:
 		return t.readBytes()
 	case UUID:
 		return nil, errors.Errorf("UUID not implemented")
 	case JavaObject:
 		return nil, errors.Errorf("Java Object not implemented")
-	case Boolean:
+	case BOOLEAN:
 		return t.readBool()
-	case Byte:
+	case TINYINT:
 		return t.readByte()
-	case Date:
+	case DATE:
 		return t.readDate()
-	case Time:
+	case TIME:
 		return t.readTime()
-	case TimeTZQuery, TimeTZ:
+	case TIME_TZ:
 		return t.readTimeTZ()
-	case Timestamp:
+	case TIMESTAMP:
 		return t.readTimestamp()
-	case TimestampTZ:
+	case TIMESTAMP_TZ:
 		return t.readTimestampTZ()
-	case Decimal:
+	case NUMERIC:
 		return nil, errors.Errorf("Decimal not implemented")
-	case Double:
+	case DOUBLE:
 		return t.readFloat64()
-	case Float:
+	case REAL:
 		return t.readFloat32()
-	case Enum:
+	case ENUM:
 		return nil, errors.Errorf("Enum not implemented")
-	case Int:
+	case INTEGER:
 		return t.readInt32()
-	case Long:
+	case BIGINT:
 		return t.readLong()
-	case Short:
+	case SMALLINT:
 		return t.readInt16()
-	case String:
+	case VARCHAR:
 		return t.readString()
-	case StringIgnoreCase:
+	case VARCHAR_IGNORECASE:
 		return t.readString()
-	case StringFixed:
+	case CHAR:
 		return t.readString()
-	case Blob:
+	case BLOB:
 		return nil, errors.Errorf("Blob not implemented")
-	case Clob:
+	case CLOB:
 		return nil, errors.Errorf("Clob not implemented")
-	case Array:
+	case ARRAY:
 		return nil, errors.Errorf("Array not implemented")
-	case Row:
+	case ROW:
 		return nil, errors.Errorf("Row not implemented")
-	case ResultSet:
+	case JAVA_OBJECT:
 		return nil, errors.Errorf("Result Set not implemented")
-	case Geometry:
+	case GEOMETRY:
 		return nil, errors.Errorf("Geometry not implemented")
 	case JSON:
 		return nil, errors.Errorf("JSON not implemented")
@@ -388,40 +409,40 @@ func (t *transfer) readValue() (interface{}, error) {
 func (t *transfer) writeValue(v interface{}) error {
 	switch kind := v.(type) {
 	case nil:
-		t.writeInt32(Null)
+		t.writeInt32(NULL)
 	case bool:
-		t.writeInt32(Boolean)
+		t.writeInt32(BOOLEAN)
 		t.writeBool(v.(bool))
 	case int:
 		s := unsafe.Sizeof(v)
 		if s == 4 {
-			t.writeInt32(Int)
+			t.writeInt32(INTEGER)
 			t.writeInt32(int32(v.(int)))
 		} else {
 			// 8 bytes
-			t.writeInt32(Long)
+			t.writeInt32(BIGINT)
 			t.writeInt64(int64(v.(int)))
 		}
 	case int16:
-		t.writeInt32(Short)
+		t.writeInt32(SMALLINT)
 		t.writeInt32(v.(int32))
 	case int32:
-		t.writeInt32(Int)
+		t.writeInt32(INTEGER)
 		t.writeInt32(int32(v.(int32)))
 	case int64:
-		t.writeInt32(Long)
+		t.writeInt32(BIGINT)
 		t.writeInt64(int64(v.(int64)))
 	case float64:
-		t.writeInt32(Double)
+		t.writeInt32(NUMERIC)
 		t.writeFloat64(v.(float64))
 	case string:
-		t.writeInt32(String)
+		t.writeInt32(VARCHAR)
 		t.writeString(v.(string))
 	case byte:
-		t.writeInt32(Byte)
+		t.writeInt32(TINYINT)
 		t.writeByte(v.(byte))
 	case []byte:
-		t.writeInt32(Bytes)
+		t.writeInt32(VARBINARY)
 		t.writeBytes(v.([]byte))
 	// case time.Time:
 	default:
@@ -430,18 +451,24 @@ func (t *transfer) writeValue(v interface{}) error {
 	return nil
 }
 func (t *transfer) writeDatetimeValue(dt time.Time, mdp h2parameter) error {
-	L(log.DebugLevel, "Date/time type: %d", mdp.kind)
+	var kind int32
+	if t.getVersion() < TCP_PROTOCOL_VERSION_20 {
+		kind = mdp.typeinfo.(TypeInfo19).Type
+	} else {
+		kind = mdp.typeinfo.(TypeInfo20).Type
+	}
+	L(log.DebugLevel, "Date/time type: %d", kind)
 	var err error
-	switch mdp.kind {
-	case Date:
-		t.writeInt32(Date)
+	switch kind {
+	case DATE:
+		t.writeInt32(DATE)
 		bin := date2bin(&dt)
 		err = t.writeInt64(bin)
 		if err != nil {
 			return err
 		}
-	case Timestamp:
-		t.writeInt32(Timestamp)
+	case TIMESTAMP:
+		t.writeInt32(TIMESTAMP)
 		dateBin, nsecBin := ts2bin(&dt)
 		err = t.writeInt64(dateBin)
 		if err != nil {
@@ -451,8 +478,8 @@ func (t *transfer) writeDatetimeValue(dt time.Time, mdp h2parameter) error {
 		if err != nil {
 			return err
 		}
-	case TimestampTZ:
-		t.writeInt32(TimestampTZ)
+	case TIMESTAMP_TZ:
+		t.writeInt32(TIMESTAMP_TZ)
 		dateBin, nsecBin, offsetTZBin := tsz2bin(&dt)
 		err = t.writeInt64(dateBin)
 		if err != nil {
@@ -466,15 +493,15 @@ func (t *transfer) writeDatetimeValue(dt time.Time, mdp h2parameter) error {
 		if err != nil {
 			return err
 		}
-	case Time:
-		t.writeInt32(Time)
+	case TIME:
+		t.writeInt32(TIME)
 		nsecBin := time2bin(&dt)
 		err = t.writeInt64(nsecBin)
 		if err != nil {
 			return err
 		}
-	case TimeTZ:
-		t.writeInt32(TimeTZQuery)
+	case TIME_TZ:
+		t.writeInt32(TIME_TZ)
 		nsecBin, offsetTZBin := timetz2bin(&dt)
 		err = t.writeInt64(nsecBin)
 		if err != nil {
@@ -485,7 +512,7 @@ func (t *transfer) writeDatetimeValue(dt time.Time, mdp h2parameter) error {
 			return err
 		}
 	default:
-		return fmt.Errorf("Datatype unsupported: %d", mdp.kind)
+		return fmt.Errorf("Datatype unsupported: %d", kind)
 	}
 	return nil
 }
@@ -628,4 +655,77 @@ func timetz2bin(dt *time.Time) (int64, int32) {
 	nsecBin += int64(dt.Nanosecond())
 	_, offsetTZ := dt.Zone()
 	return nsecBin, int32(offsetTZ)
+}
+
+type TypeInfo19 struct {
+	Type      int32
+	Precision int64
+	Scale     int32
+}
+
+func (t *transfer) getTypeInfo19() (info TypeInfo19, err error) {
+	// Skip other info
+	// - Value type (int)
+	info.Type, err = t.readInt32()
+	if err != nil {
+		return
+	}
+	// - Precision (long)
+	info.Precision, err = t.readLong()
+	if err != nil {
+		return
+	}
+	// - Scale (int)
+	info.Scale, err = t.readInt32()
+	return
+}
+
+type TypeInfo20 struct {
+	Type            int32
+	Precision       int64
+	Scale           int32
+	ExtTypeInfoFlag bool
+}
+
+func (t *transfer) getTypeInfo20() (info TypeInfo20, err error) {
+	// Skip other info
+	// - Value type (int)
+	info.Type, err = t.readInt32()
+	if err != nil {
+		return
+	}
+
+	switch info.Type {
+	case UNKNOWN, NULL, BOOLEAN, TINYINT, SMALLINT, INTEGER, BIGINT, DATE, UUID:
+		return
+	case CHAR, VARCHAR, VARCHAR_IGNORECASE, BINARY, VARBINARY, DECFLOAT, JAVA_OBJECT, JSON:
+		// - Precision (int32)
+		var precision int32
+		precision, err = t.readInt32()
+		if err != nil {
+			return
+		}
+		info.Precision = int64(precision)
+	case CLOB, BLOB:
+		// - Precision (long)
+		info.Precision, err = t.readLong()
+		if err != nil {
+			return
+		}
+	case NUMERIC:
+		// - Precision (int32)
+		var precision int32
+		precision, err = t.readInt32()
+		if err != nil {
+			return
+		}
+		info.Precision = int64(precision)
+		// - Scale (int)
+		info.Scale, err = t.readInt32()
+	// TO DO more types
+	default:
+		return info, fmt.Errorf("handle typeinfo20 for type %d is not implemented", info.Type)
+	}
+
+	return
 }

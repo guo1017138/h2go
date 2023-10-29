@@ -37,10 +37,8 @@ type h2stmt struct {
 }
 
 type h2parameter struct {
-	kind       int32
-	precission int64
-	scale      int32
-	nullable   bool
+	nullable bool
+	typeinfo interface{}
 }
 
 // Interface Stmt
@@ -55,7 +53,11 @@ func (h2s h2stmt) NumInput() int {
 
 // Interface StmtQueryContext
 func (h2s h2stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
-	cols, nRows, err := h2s.client.sess.executeQuery(&h2s, &h2s.client.trans)
+	var argsValues []driver.Value
+	for _, arg := range args {
+		argsValues = append(argsValues, arg.Value)
+	}
+	cols, nRows, err := h2s.client.sess.executeQuery(&h2s, &h2s.client.trans, argsValues)
 	if err != nil {
 		return nil, err
 	}

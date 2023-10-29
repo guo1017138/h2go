@@ -33,12 +33,12 @@ type h2client struct {
 func (c *h2client) doHandshake(ci h2connInfo) error {
 	var err error
 	// 1. send min client version
-	err = c.trans.writeInt32(9)
+	err = c.trans.writeInt32(TCP_PROTOCOL_VERSION_17)
 	if err != nil {
 		return errors.Wrapf(err, "H2 handshake: can't send min client version")
 	}
 	// 2. send max client version
-	err = c.trans.writeInt32(19)
+	err = c.trans.writeInt32(TCP_PROTOCOL_VERSION_20)
 	if err != nil {
 		return errors.Wrapf(err, "H2 handshake: can't send max client version")
 	}
@@ -91,6 +91,7 @@ func (c *h2client) doHandshake(ci h2connInfo) error {
 	if err != nil {
 		return errors.Wrapf(err, "H2 handshake: can't get H2 Server client version ack")
 	}
+	c.trans.version = clientVer
 	L(log.InfoLevel, "H2 server code: %d - client ver: %d", code, clientVer)
 	return nil
 }

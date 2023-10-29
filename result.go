@@ -26,8 +26,8 @@ import (
 type h2Result struct {
 	query   string
 	columns []string
-	numRows int32
-	curRow  int32
+	numRows int64
+	curRow  int64
 	trans   *transfer
 
 	// Interface
@@ -70,7 +70,7 @@ func (h2r *h2Result) Next(dest []driver.Value) error {
 }
 
 type h2ExecResult struct {
-	nUpdated int32
+	nUpdated int64
 	// Interface
 	driver.Result
 }
