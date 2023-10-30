@@ -151,6 +151,10 @@ func (t *transfer) readFloat64() (float64, error) {
 	return ret, nil
 }
 
+func (t *transfer) writeInt16(v int16) error {
+	return binary.Write(t.buff, binary.BigEndian, v)
+}
+
 func (t *transfer) writeInt32(v int32) error {
 	return binary.Write(t.buff, binary.BigEndian, v)
 }
@@ -194,7 +198,7 @@ func (t *transfer) writeString(s string) error {
 	data := []byte(s)
 	n := int32(len(data))
 	if n == 0 {
-		err = t.writeInt32(-1)
+		err = t.writeInt32(0)
 		return err
 	}
 	enc := unicode.UTF16(unicode.BigEndian, unicode.IgnoreBOM).NewEncoder()
@@ -431,7 +435,11 @@ func (t *transfer) writeValue(v interface{}) error {
 		}
 	case int16:
 		t.writeInt32(SMALLINT)
-		t.writeInt32(v.(int32))
+		if t.getVersion() < TCP_PROTOCOL_VERSION_20 {
+			t.writeInt32(v.(int32))
+		} else {
+			t.writeInt16(v.(int16))
+		}
 	case int32:
 		t.writeInt32(INTEGER)
 		t.writeInt32(int32(v.(int32)))
@@ -494,6 +502,9 @@ func (t *transfer) writeDatetimeValue(dt time.Time, mdp h2parameter) error {
 		err = t.writeInt64(nsecBin)
 		if err != nil {
 			return err
+		}
+		if t.getVersion() < TCP_PROTOCOL_VERSION_19 {
+			offsetTZBin = offsetTZBin / 60
 		}
 		err = t.writeInt32(offsetTZBin)
 		if err != nil {

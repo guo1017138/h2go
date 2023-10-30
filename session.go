@@ -342,9 +342,9 @@ func (s *session) executeQueryUpdate(stmt *h2stmt, t *transfer, values []driver.
 	}
 	// -- parameters
 	for idx, value := range values {
-		switch value.(type) {
+		switch value := value.(type) {
 		case time.Time:
-			err = t.writeDatetimeValue(value.(time.Time), stmt.parameters[idx])
+			err = t.writeDatetimeValue(value, stmt.parameters[idx])
 		default:
 			err = t.writeValue(value)
 		}
