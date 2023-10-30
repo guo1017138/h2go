@@ -41,43 +41,50 @@ const (
 
 // Value types
 const (
-	UNKNOWN            int32 = -1
-	NULL               int32 = 0
-	BOOLEAN            int32 = 1
-	TINYINT            int32 = 2
-	SMALLINT           int32 = 3
-	INTEGER            int32 = 4
-	BIGINT             int32 = 5
-	NUMERIC            int32 = 6
-	DOUBLE             int32 = 7
-	REAL               int32 = 8
-	TIME               int32 = 9
-	DATE               int32 = 10
-	TIMESTAMP          int32 = 11
-	VARBINARY          int32 = 12
-	VARCHAR            int32 = 13
-	VARCHAR_IGNORECASE int32 = 14
-	BLOB               int32 = 15
-	CLOB               int32 = 16
-	ARRAY              int32 = 17
-	JAVA_OBJECT        int32 = 18
-	JavaObject         int32 = 19
-	UUID               int32 = 20
-	CHAR               int32 = 21
-	GEOMETRY           int32 = 22
-	// 1.4.192
-	TIMESTAMP_TZ int32 = 24
-	// 1.4.195
-	ENUM int32 = 25
-	// 1.4.198
-	INTERVAL int32 = 26
-	ROW      int32 = 27
-	// 1.4.200
-	JSON    int32 = 28
-	TIME_TZ int32 = 29
-	// 2.0.202
-	BINARY   int32 = 30
-	DECFLOAT int32 = 31
+	UNKNOWN                   int32 = -1
+	NULL                      int32 = 0
+	BOOLEAN                   int32 = 1
+	TINYINT                   int32 = 2
+	SMALLINT                  int32 = 3
+	INTEGER                   int32 = 4
+	BIGINT                    int32 = 5
+	NUMERIC                   int32 = 6
+	DOUBLE                    int32 = 7
+	REAL                      int32 = 8
+	TIME                      int32 = 9
+	DATE                      int32 = 10
+	TIMESTAMP                 int32 = 11
+	VARBINARY                 int32 = 12
+	VARCHAR                   int32 = 13
+	VARCHAR_IGNORECASE        int32 = 14
+	BLOB                      int32 = 15
+	CLOB                      int32 = 16
+	ARRAY                     int32 = 17
+	JAVA_OBJECT               int32 = 18
+	JavaObject                int32 = 19
+	UUID                      int32 = 20
+	CHAR                      int32 = 21
+	GEOMETRY                  int32 = 22
+	TIMESTAMP_TZ              int32 = 24
+	ENUM                      int32 = 25
+	INTERVAL_YEAR             int32 = 26
+	INTERVAL_MONTH            int32 = 27
+	INTERVAL_DAY              int32 = 28
+	INTERVAL_HOUR             int32 = 29
+	INTERVAL_MINUTE           int32 = 30
+	INTERVAL_SECOND           int32 = 31
+	INTERVAL_YEAR_TO_MONTH    int32 = 32
+	INTERVAL_DAY_TO_HOUR      int32 = 33
+	INTERVAL_DAY_TO_MINUTE    int32 = 34
+	INTERVAL_DAY_TO_SECOND    int32 = 35
+	INTERVAL_HOUR_TO_MINUTE   int32 = 36
+	INTERVAL_HOUR_TO_SECOND   int32 = 37
+	INTERVAL_MINUTE_TO_SECOND int32 = 38
+	ROW                       int32 = 39
+	JSON                      int32 = 40
+	TIME_TZ                   int32 = 41
+	BINARY                    int32 = 42
+	DECFLOAT                  int32 = 43
 )
 
 type transfer struct {
@@ -187,14 +194,8 @@ func (t *transfer) writeString(s string) error {
 	data := []byte(s)
 	n := int32(len(data))
 	if n == 0 {
-		n = -1
-	}
-	err = t.writeInt32(n)
-	if err != nil {
-		return errors.Wrapf(err, "can't write string length to socket")
-	}
-	if n == -1 {
-		return nil
+		err = t.writeInt32(-1)
+		return err
 	}
 	enc := unicode.UTF16(unicode.BigEndian, unicode.IgnoreBOM).NewEncoder()
 	data, err = enc.Bytes(data)
@@ -214,6 +215,11 @@ func (t *transfer) writeString(s string) error {
 			}
 		}
 	*/
+	n = int32(len(data) / 2)
+	err = t.writeInt32(n)
+	if err != nil {
+		return errors.Wrapf(err, "can't write string length to socket")
+	}
 	n2, err := t.buff.Write(data)
 	if err != nil {
 		return errors.Wrapf(err, "can't write string to socket")
@@ -680,11 +686,25 @@ func (t *transfer) getTypeInfo19() (info TypeInfo19, err error) {
 	return
 }
 
+type ExtTypeInfoGeometry struct {
+	Type *int16
+	Srid *int32
+}
+
+type ExtTypeInfoRow struct {
+	Key      string
+	TypeInfo TypeInfo20
+}
+
 type TypeInfo20 struct {
 	Type            int32
 	Precision       int64
 	Scale           int32
 	ExtTypeInfoFlag bool
+	Enum            []string
+	Row             []ExtTypeInfoRow
+	Geometry        *ExtTypeInfoGeometry
+	ExtTypeInfo     *TypeInfo20
 }
 
 func (t *transfer) getTypeInfo20() (info TypeInfo20, err error) {
@@ -699,33 +719,185 @@ func (t *transfer) getTypeInfo20() (info TypeInfo20, err error) {
 	case UNKNOWN, NULL, BOOLEAN, TINYINT, SMALLINT, INTEGER, BIGINT, DATE, UUID:
 		return
 	case CHAR, VARCHAR, VARCHAR_IGNORECASE, BINARY, VARBINARY, DECFLOAT, JAVA_OBJECT, JSON:
-		// - Precision (int32)
-		var precision int32
-		precision, err = t.readInt32()
+		err = info.GetPrecision(t, 32)
 		if err != nil {
 			return
 		}
-		info.Precision = int64(precision)
 	case CLOB, BLOB:
-		// - Precision (long)
-		info.Precision, err = t.readLong()
+		err = info.GetPrecision(t, 64)
 		if err != nil {
 			return
 		}
 	case NUMERIC:
-		// - Precision (int32)
-		var precision int32
-		precision, err = t.readInt32()
+		err = info.GetPrecision(t, 32)
 		if err != nil {
 			return
 		}
-		info.Precision = int64(precision)
 		// - Scale (int)
 		info.Scale, err = t.readInt32()
-	// TO DO more types
+		if err != nil {
+			return
+		}
+		// ExtTypeInfo (boolean)
+		info.ExtTypeInfoFlag, err = t.readBool()
+		if err != nil {
+			return
+		}
+	case REAL, DOUBLE, INTERVAL_YEAR, INTERVAL_MONTH, INTERVAL_DAY, INTERVAL_HOUR, INTERVAL_MINUTE, INTERVAL_YEAR_TO_MONTH, INTERVAL_DAY_TO_HOUR, INTERVAL_DAY_TO_MINUTE, INTERVAL_HOUR_TO_MINUTE:
+		err = info.GetPrecision(t, 8)
+		if err != nil {
+			return
+		}
+	case TIME, TIME_TZ, TIMESTAMP, TIMESTAMP_TZ:
+		// - Scale (byte)
+		var scale byte
+		scale, err = t.readByte()
+		if err != nil {
+			return
+		}
+		info.Scale = int32(scale)
+	case INTERVAL_SECOND, INTERVAL_DAY_TO_SECOND, INTERVAL_HOUR_TO_SECOND, INTERVAL_MINUTE_TO_SECOND:
+		err = info.GetPrecision(t, 8)
+		if err != nil {
+			return
+		}
+		// - Scale (byte)
+		var scale byte
+		scale, err = t.readByte()
+		if err != nil {
+			return
+		}
+		info.Scale = int32(scale)
+	case ENUM:
+		err = info.GetEnum(t)
+		if err != nil {
+			return
+		}
+	case GEOMETRY:
+		err = info.GetGeometry(t)
+		if err != nil {
+			return
+		}
+	case ARRAY:
+		err = info.GetPrecision(t, 32)
+		if err != nil {
+			return
+		}
+		extTypeInfo, err := t.getTypeInfo20()
+		if err != nil {
+			return info, err
+		}
+		info.ExtTypeInfo = &extTypeInfo
+	case ROW:
+
 	default:
 		return info, fmt.Errorf("handle typeinfo20 for type %d is not implemented", info.Type)
 	}
 
 	return
+}
+
+func (ti *TypeInfo20) GetPrecision(t *transfer, size int) (err error) {
+	switch size {
+	case 8:
+		// - Precision (byte)
+		var precision byte
+		precision, err = t.readByte()
+		if err != nil {
+			return
+		}
+		ti.Precision = int64(precision)
+	case 32:
+		// - Precision (int32)
+		var precision int32
+		precision, err = t.readInt32()
+		if err != nil {
+			return
+		}
+		ti.Precision = int64(precision)
+	case 64:
+		// - Precision (long)
+		ti.Precision, err = t.readLong()
+		if err != nil {
+			return
+		}
+	default:
+		return fmt.Errorf("get precision with size %d is not implemented", size)
+	}
+	return nil
+}
+
+func (ti *TypeInfo20) GetEnum(t *transfer) (err error) {
+	count, err := t.readInt32()
+	if err != nil {
+		return err
+	}
+	for i := 0; i < int(count); i++ {
+		s, err := t.readString()
+		if err != nil {
+			return err
+		}
+		ti.Enum = append(ti.Enum, s)
+	}
+	return nil
+}
+
+func (ti *TypeInfo20) GetGeometry(t *transfer) (err error) {
+	flag, err := t.readByte()
+	if err != nil {
+		return err
+	}
+	if flag != 0 {
+		ti.Geometry = &ExtTypeInfoGeometry{}
+	}
+	switch flag {
+	case 0:
+		return
+	case 1:
+		type1, err := t.readInt16()
+		if err != nil {
+			return err
+		}
+		ti.Geometry.Type = &type1
+	case 2:
+		srid, err := t.readInt32()
+		if err != nil {
+			return err
+		}
+		ti.Geometry.Srid = &srid
+	case 3:
+		type1, err := t.readInt16()
+		if err != nil {
+			return err
+		}
+		ti.Geometry.Type = &type1
+		srid, err := t.readInt32()
+		if err != nil {
+			return err
+		}
+		ti.Geometry.Srid = &srid
+	default:
+		return fmt.Errorf("unknow geometry flag %d", flag)
+	}
+	return nil
+}
+
+func (ti *TypeInfo20) GetRow(t *transfer) (err error) {
+	count, err := t.readInt32()
+	if err != nil {
+		return err
+	}
+	for i := int32(0); i < count; i++ {
+		row := ExtTypeInfoRow{}
+		row.Key, err = t.readString()
+		if err != nil {
+			return err
+		}
+		row.TypeInfo, err = t.getTypeInfo20()
+		if err != nil {
+			return err
+		}
+		ti.Row = append(ti.Row, row)
+	}
+	return nil
 }
